@@ -4,6 +4,7 @@
 #include "BleFingerprintCollection.h"
 #include "mqtt.h"
 #include <WiFi.h>
+#include <memory>
 
 bool pub(const char *topic, uint8_t qos, bool retain, const char *payload, size_t length, bool dup, uint16_t message_id)
 {
@@ -14,11 +15,42 @@ bool pub(const char *topic, uint8_t qos, bool retain, const char *payload, size_
 
 bool pub(const char *topic, uint8_t qos, bool retain, JsonVariantConst jsonDoc, bool dup, uint16_t message_id)
 {
+    // Heap-allocate the serialized payload rather than using a VLA on the
+    // caller's FreeRTOS task stack. AsyncMqttClient copies the payload
+    // synchronously inside PublishOutPacket's ctor, so the buffer can be
+    // freed as soon as publish() returns. See PR #2315 for why we moved off
+    // the stack despite the nominal payload size being small.
+    //
+    // The (measureJson, serializeJson) pair is TOCTOU-racy against any
+    // concurrent mutation of a shared JsonDocument. If measured and
+    // serialized sizes disagree we refuse to publish rather than emit
+    // truncated JSON that the broker would flag as malformed.
     size_t const jsonSize = measureJson(jsonDoc);
-    char buffer[jsonSize + 1]; // +1 for null terminator
-    size_t const buffSize = serializeJson(jsonDoc, buffer, sizeof(buffer));
-    if (buffSize == 0) return false;
-    return pub(topic, qos, retain, buffer, buffSize, dup, message_id);
+    std::unique_ptr<char[]> buffer(new (std::nothrow) char[jsonSize + 1]);
+    if (!buffer) {
+        log_w("pub: unable to allocate %u-byte JSON buffer on topic %s", (unsigned)(jsonSize + 1), topic);
+        return false;
+    }
+    size_t const buffSize = serializeJson(jsonDoc, buffer.get(), jsonSize + 1);
+    if (buffSize == 0 || buffSize != jsonSize) {
+        log_w("pub: serialize mismatch on topic %s (measured=%u, serialized=%u)",
+              topic, (unsigned)jsonSize, (unsigned)buffSize);
+        return false;
+    }
+    return pub(topic, qos, retain, buffer.get(), buffSize, dup, message_id);
+}
+
+bool pub(const char *topic, uint8_t qos, bool retain, const JsonDocument &jsonDoc, bool dup, uint16_t message_id)
+{
+    // DynamicJsonDocument / BasicJsonDocument overflow is silent — writes
+    // past pool capacity are dropped, producing valid JSON with missing
+    // fields. Log once per publish so missing HA discovery entities or
+    // truncated telemetry point at the underlying cause.
+    if (jsonDoc.overflowed()) {
+        log_w("pub: JSON doc overflowed (cap=%u, memUsage=%u) on topic %s — bump SHARED_JSON_DOC_CAPACITY",
+              (unsigned)jsonDoc.capacity(), (unsigned)jsonDoc.memoryUsage(), topic);
+    }
+    return pub(topic, qos, retain, jsonDoc.as<JsonVariantConst>(), dup, message_id);
 }
 
 void commonDiscovery()

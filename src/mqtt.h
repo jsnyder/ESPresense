@@ -1,5 +1,6 @@
 #pragma once
 #include <Arduino.h>
+#include <ArduinoJson.h>
 
 const char *const EC_DIAGNOSTIC = "diagnostic";
 const char *const EC_CONFIG = "config";
@@ -9,6 +10,7 @@ static const char *const DEVICE_CLASS_NONE = "";
 
 bool pub(const char *topic, uint8_t qos, bool retain, const char *payload, size_t length = 0, bool dup = false, uint16_t message_id = 0);
 bool pub(const char *topic, uint8_t qos, bool retain, JsonVariantConst jsonDoc, bool dup = false, uint16_t message_id = 0);
+bool pub(const char *topic, uint8_t qos, bool retain, const JsonDocument &jsonDoc, bool dup = false, uint16_t message_id = 0);
 void commonDiscovery();
 
 bool sendConnectivityDiscovery();
