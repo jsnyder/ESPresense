@@ -1,5 +1,6 @@
 #include <Arduino.h>
 #include <ArduinoOTA.h>
+#include <NimBLEDevice.h>
 #include <SPIFFS.h>
 #include <WiFi.h>
 #include <WiFiClientSecure.h>
@@ -19,6 +20,37 @@ namespace Updater {
 bool autoUpdateEnabled, prerelease;
 bool arduinoOtaEnabled, arduinoOtaConfgured = false;
 unsigned long updateStartedMillis = 0;
+
+// Free the radio for OTA by silencing the other things that contend for it:
+// stop BLE scan, drop WiFi power-save (buffered wake windows kill OTA), and
+// close the MQTT socket (its keepalive + pending publishes + subscribes all
+// compete for airtime we need for the 1MB+ firmware download).
+// On success the device reboots, so restoration only matters on failure.
+static bool wifiWasSleeping = true;
+
+static void quietForOta() {
+    auto *sc = NimBLEDevice::getScan();
+    if (sc && sc->isScanning()) sc->stop();
+    if (mqttClient.connected()) mqttClient.disconnect(true);
+    wifiWasSleeping = WiFi.getSleep();
+    WiFi.setSleep(WIFI_PS_NONE);
+}
+
+static void resumeFromOta() {
+    WiFi.setSleep(wifiWasSleeping ? WIFI_PS_MIN_MODEM : WIFI_PS_NONE);
+    auto *sc = NimBLEDevice::getScan();
+    if (sc && !sc->isScanning()) {
+#ifdef NIMBLE_V2
+        sc->start(0, false);
+#else
+        sc->start(0, nullptr, false);
+#endif
+    }
+    // mqttClient will reconnect via the reconnectTimer (3s period).
+}
+
+bool isUpdating() { return updateStartedMillis != 0; }
+
 unsigned long lastFirmwareCheck = 0;
 unsigned short autoUpdateAttempts = 0;
 String updateUrl;
@@ -110,6 +142,7 @@ void firmwareUpdate() {
     httpUpdate.onStart([url]() {
         autoUpdateAttempts++;
         updateStartedMillis = millis();
+        quietForOta();
         GUI::Update(UPDATE_STARTED);
         HttpWebServer::UpdateStart();
         Log.printf("Starting firmware update from: %s\n", url.c_str());
@@ -121,6 +154,7 @@ void firmwareUpdate() {
     });
 
     httpUpdate.onEnd([](bool success) {
+        if (!success) resumeFromOta();
         if (success) {
             SPIFFS.remove("/update");
             Log.println("Firmware update completed successfully!");
@@ -177,6 +211,7 @@ void configureOTA(void) {
     ArduinoOTA
         .onStart([]() {
             updateStartedMillis = millis();
+            quietForOta();
             GUI::Update(UPDATE_STARTED);
             HttpWebServer::UpdateStart();
         })
@@ -189,6 +224,7 @@ void configureOTA(void) {
             GUI::Update((progress / (total / 100)));
         })
         .onError([](ota_error_t error) {
+            resumeFromOta();
             Log.printf("Error[%u]: ", error);
             if (error == OTA_AUTH_ERROR)
                 Log.println("Auth Failed");
