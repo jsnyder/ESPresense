@@ -2,6 +2,7 @@
 #include "main.h"
 
 #include "esp_heap_caps.h"
+#include "esp_coexist.h"
 
 
 void heapCapsAllocFailedHook(size_t requestedSize, uint32_t caps, const char *functionName)
@@ -651,6 +652,11 @@ void scanTask(void *parameter) {
  * starts the BLE scan task, and performs MQTT/reporting setup.
  */
 void setup() {
+    // Bias the WiFi/BT coexistence arbiter toward WiFi. On single-antenna ESP32
+    // variants the shared 2.4 GHz radio is time-sliced between protocols, and
+    // this ensures that when both want airtime, WiFi wins (so keepalives /
+    // MQTT / OTA don't get starved by BLE scan activity).
+    esp_coex_preference_set(ESP_COEX_PREFER_WIFI);
 #ifdef FAST_MONITOR
     Serial.begin(1500000);
 #else

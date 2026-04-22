@@ -20,8 +20,14 @@
 
 #define JSON_BUFFER_SIZE (12 * 1024)
 
-#define BLE_SCAN_INTERVAL 0x80
-#define BLE_SCAN_WINDOW 0x80
+// BLE scan duty-cycle: matches ESPHome's battle-tested default for the same
+// WiFi/BT coexistence problem — window/interval = 30/320 ms = ~9.4% duty.
+// Prior value of 0x80/0x80 (100% duty) was a longstanding ESPresense bug that
+// starved WiFi on single-antenna ESP32s and presented as UniFi deauth / MQTT
+// keepalive failures / OTA starvation on busier networks. Units are 0.625 ms
+// per the BLE GAP spec; ESPHome's esp32_ble_tracker uses identical values.
+#define BLE_SCAN_INTERVAL 0x200  // 320 ms
+#define BLE_SCAN_WINDOW   0x30   //  30 ms
 
 #define MAX_TIME_SLOTS 64
 
