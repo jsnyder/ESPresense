@@ -20,14 +20,27 @@
 
 #define JSON_BUFFER_SIZE (12 * 1024)
 
-// BLE scan duty-cycle: matches ESPHome's battle-tested default for the same
-// WiFi/BT coexistence problem — window/interval = 30/320 ms = ~9.4% duty.
-// Prior value of 0x80/0x80 (100% duty) was a longstanding ESPresense bug that
-// starved WiFi on single-antenna ESP32s and presented as UniFi deauth / MQTT
-// keepalive failures / OTA starvation on busier networks. Units are 0.625 ms
-// per the BLE GAP spec; ESPHome's esp32_ble_tracker uses identical values.
-#define BLE_SCAN_INTERVAL 0x200  // 320 ms
-#define BLE_SCAN_WINDOW   0x30   //  30 ms
+// BLE scan duty-cycle. Units are 0.625 ms per the BLE GAP spec.
+//
+// Upstream shipped 0x80/0x80 — interval == window, a 100% duty-cycle scan. On
+// single-antenna ESP32s the WiFi and BT radios share one 2.4 GHz front end,
+// time-sliced by the ESP-IDF coexistence arbiter, so a 100% BLE duty leaves
+// WiFi effectively no airtime: UniFi marks the client powersave/unreachable,
+// RTT spikes into seconds, MQTT keepalives expire, and OTA can't sustain a
+// 1.3 MB transfer.
+//
+// 60/160 ms = 37.5% duty. Deliberately NOT ESPHome's esp32_ble_tracker value
+// (30/320, ~9.4%): that tracker only needs to notice a device eventually,
+// while ESPresense has to invert RSSI into a distance on three or more nodes
+// simultaneously to produce a position fix. At 9.4% each node hears roughly
+// one advertisement in eleven, and the probability of enough nodes catching
+// the same device within one fix window collapses. 37.5% keeps WiFi healthy
+// while leaving four times the observations of the ESPHome value.
+//
+// Tune here if a node's WiFi is still starved — this is the knob, and the
+// right value depends on advertisement density and AP behaviour on site.
+#define BLE_SCAN_INTERVAL 0x100  // 160 ms
+#define BLE_SCAN_WINDOW   0x60   //  60 ms
 
 #define MAX_TIME_SLOTS 64
 
