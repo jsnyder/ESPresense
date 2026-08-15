@@ -504,7 +504,11 @@ void connectToMqtt() {
     mqttClient.setServer(mqttHost.c_str(), mqttPort);
     mqttClient.setWill(statusTopic.c_str(), 0, true, "offline");
     mqttClient.setCredentials(mqttUser.c_str(), mqttPass.c_str());
-    mqttClient.setKeepAlive(60);  // 60 seconds - more tolerant than default 15s
+    // Keepalive 180s (broker timeout = 1.5x = 270s). 60s was marginal on
+    // high-advertisement-density nodes (oscar, upstairs_south_west) where
+    // AsyncTCP TX occasionally stalls long enough to miss a PINGREQ window
+    // under BLE/WiFi coexistence, causing broker "exceeded timeout" drops.
+    mqttClient.setKeepAlive(180);
     mqttClient.connect();
 }
 

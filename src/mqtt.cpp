@@ -10,7 +10,17 @@ bool pub(const char *topic, uint8_t qos, bool retain, const char *payload, size_
 {
     // Non-blocking publish - let AsyncMqttClient handle its own queue
     // Blocking delays here prevent MQTT keepalive responses
-    return mqttClient.publish(topic, qos, retain, payload, length, dup, message_id);
+    uint16_t pid = mqttClient.publish(topic, qos, retain, payload, length, dup, message_id);
+    if (pid == 0) {
+        // Diagnostic: distinguish "not connected" from "queue/alloc failure".
+        // AsyncMqttClient::publish returns 0 for either case; without this
+        // we can't tell why the first status=online fails on nodes like oscar.
+        bool connected = mqttClient.connected();
+        Log.printf("pub FAIL topic=%s qos=%u retain=%d len=%u connected=%d heap=%u minHeap=%u\r\n",
+                   topic, (unsigned)qos, (int)retain, (unsigned)length,
+                   (int)connected, (unsigned)ESP.getFreeHeap(), (unsigned)ESP.getMinFreeHeap());
+    }
+    return pid;
 }
 
 bool pub(const char *topic, uint8_t qos, bool retain, JsonVariantConst jsonDoc, bool dup, uint16_t message_id)
