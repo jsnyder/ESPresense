@@ -12,13 +12,23 @@ bool pub(const char *topic, uint8_t qos, bool retain, const char *payload, size_
     // Blocking delays here prevent MQTT keepalive responses
     uint16_t pid = mqttClient.publish(topic, qos, retain, payload, length, dup, message_id);
     if (pid == 0) {
-        // Diagnostic: distinguish "not connected" from "queue/alloc failure".
-        // AsyncMqttClient::publish returns 0 for either case; without this
-        // we can't tell why the first status=online fails on nodes like oscar.
-        bool connected = mqttClient.connected();
-        Log.printf("pub FAIL topic=%s qos=%u retain=%d len=%u connected=%d heap=%u minHeap=%u\r\n",
-                   topic, (unsigned)qos, (int)retain, (unsigned)length,
-                   (int)connected, (unsigned)ESP.getFreeHeap(), (unsigned)ESP.getMinFreeHeap());
+        // AsyncMqttClient::publish has exactly two failure paths:
+        //   _state != CONNECTED  ||  ESP.getMaxAllocHeap() < MQTT_MIN_FREE_MEMORY
+        // so log both inputs. maxAlloc is the one that matters and the one that
+        // is easy to miss: it is the largest *contiguous* block, not total free
+        // heap. A node can sit on 88 KB free and still fail every publish once
+        // the heap is fragmented below the 12 KB threshold, which reads as a
+        // connectivity fault right up until you print this number.
+        //
+        // length is the caller's argument, not the wire length — AsyncMqttClient
+        // substitutes strlen(payload) when it is 0, so print that instead to
+        // avoid a misleading len=0 on every string publish.
+        const unsigned wireLen = (payload != nullptr && length == 0) ? strlen(payload) : length;
+        Log.printf("pub FAIL topic=%s qos=%u retain=%d len=%u connected=%d maxAlloc=%u (need %u) heap=%u minHeap=%u\r\n",
+                   topic, (unsigned)qos, (int)retain, wireLen,
+                   (int)mqttClient.connected(),
+                   (unsigned)ESP.getMaxAllocHeap(), (unsigned)MQTT_MIN_FREE_MEMORY,
+                   (unsigned)ESP.getFreeHeap(), (unsigned)ESP.getMinFreeHeap());
     }
     return pid;
 }
